@@ -1,0 +1,190 @@
+# Agent Configurations
+# ====================
+#
+# This file defines the system prompts and settings for each agent.
+# Modify these to customize agent behavior without changing code.
+#
+# WHY YAML?
+# ---------
+# 1. Easy to edit without touching Python code
+# 2. Supports multi-line strings (for prompts)
+# 3. Human-readable format
+# 4. Can be version-controlled separately
+
+# Global settings that apply to all agents
+defaults:
+  temperature: 0.7
+  max_tokens: 2048
+  timeout_seconds: 30
+
+# Individual agent configurations
+agents:
+  academic_advisor:
+    name: "Academic Advisor"
+    description: "AI advisor for Morgan State University Computer Science students. Helps with course selection, degree requirements, faculty information, and academic planning."
+    enabled: true
+    categories:
+      - academic
+      - courses
+      - progress
+    keywords:
+      - advisor
+      - faculty
+      - professor
+      - requirement
+      - prerequisite
+      - degree
+      - major
+      - minor
+      - gpa
+      - academic
+      - credits
+
+  career_guidance:
+    name: "Career Guidance"
+    description: "Career advisor for CS students at Morgan State. Helps explore career paths, internships, job opportunities, resume tips, and industry trends in technology."
+    enabled: true
+    categories:
+      - career
+    keywords:
+      - job
+      - internship
+      - career
+      - resume
+      - interview
+      - salary
+      - company
+      - industry
+      - work
+      - employment
+      - hiring
+      - linkedin
+
+  course_recommender:
+    name: "Course Recommender"
+    description: "Recommends CS courses at Morgan State based on student interests, career goals, and completed prerequisites. Helps plan semester schedules and course sequences."
+    enabled: true
+    categories:
+      - courses
+    keywords:
+      - course
+      - class
+      - recommend
+      - take
+      - next semester
+      - elective
+      - cosc
+      - what should i take
+
+  schedule_builder:
+    name: "Schedule Builder"
+    description: "Helps students build conflict-free class schedules at Morgan State. Considers course times, prerequisites, workload balance, and personal preferences."
+    enabled: true
+    categories:
+      - schedule
+    keywords:
+      - schedule
+      - time
+      - conflict
+      - when
+      - morning
+      - afternoon
+      - mwf
+      - tth
+      - credits
+
+  degreeworks:
+    name: "DegreeWorks"
+    description: "Tracks degree progress for CS students at Morgan State. Analyzes completed courses, remaining requirements, and helps with graduation planning using DegreeWorks audit data."
+    enabled: true
+    categories:
+      - progress
+    keywords:
+      - degreeworks
+      - graduation
+      - graduate
+      - how many credits
+      - remaining
+      - completed
+      - audit
+      - progress
+
+  general_qa:
+    name: "General Q&A"
+    description: "Answers general questions about Morgan State CS department, campus resources, registration, deadlines, policies, and student services."
+    enabled: true
+    categories:
+      - general
+    keywords:
+      - where
+      - who
+      - office
+      - contact
+      - deadline
+      - registration
+      - drop
+      - add
+      - withdraw
+      - policy
+
+  financial_aid:
+    name: "Financial Aid"
+    description: "Helps CS students with financial aid questions including scholarships, FAFSA, tuition, work-study, and emergency funding at Morgan State."
+    enabled: true
+    categories:
+      - financial
+    keywords:
+      - fafsa
+      - scholarship
+      - financial aid
+      - tuition
+      - payment
+      - loan
+      - grant
+      - work study
+      - money
+      - cost
+
+# MCP tool bindings
+# Which agents can use which MCP tools
+mcp_bindings:
+  gmail:
+    enabled: true
+    allowed_agents:
+      - academic_advisor
+      - career_guidance
+      - general_qa
+    actions:
+      - draft_email
+      - search_inbox
+    # send_email requires explicit user confirmation
+
+  calendar:
+    enabled: true
+    allowed_agents:
+      - schedule_builder
+      - academic_advisor
+      - financial_aid
+    actions:
+      - create_event
+      - quick_add_event
+      - list_events
+      - check_availability
+
+# Consensus settings
+consensus:
+  # Weights for scoring (must sum to 1.0)
+  weights:
+    relevance: 0.35
+    completeness: 0.25
+    confidence: 0.25
+    specificity: 0.15
+
+  # Minimum confidence to include in selection
+  min_confidence: 0.3
+
+  # If top 2 scores are within this threshold, consider synthesis
+  synthesis_threshold: 0.1
+
+  # Whether to synthesize close scores
+  enable_synthesis: false

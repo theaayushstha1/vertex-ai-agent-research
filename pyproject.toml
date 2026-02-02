@@ -1,0 +1,77 @@
+[project]
+name = "google-ai-engine-research"
+version = "0.1.0"
+description = "Multi-agent AI system with Gmail and Calendar MCP integration, powered by Google Vertex AI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Aayush", email = "your-email@example.com"}
+]
+keywords = ["ai", "agents", "vertex-ai", "mcp", "gmail", "calendar", "langgraph"]
+
+dependencies = [
+    # Core AI Framework
+    "langchain>=0.3.0",              # Unified AI interface
+    "langgraph>=0.2.0",              # Multi-agent orchestration
+
+    # Google Vertex AI (your LLM)
+    "langchain-google-vertexai>=2.0.0",  # LangChain + Vertex AI connector
+    "google-cloud-aiplatform>=1.40.0",   # Direct Vertex AI SDK
+
+    # Google ADK (Agent Development Kit)
+    "google-adk>=0.1.0",                 # Google Agent Development Kit for Vertex AI agents
+
+    # Google APIs (Gmail & Calendar)
+    "google-api-python-client>=2.100.0", # Gmail, Calendar API client
+    "google-auth-oauthlib>=1.2.0",       # OAuth authentication
+    "google-auth-httplib2>=0.2.0",       # HTTP transport for auth
+
+    # MCP (Model Context Protocol)
+    "mcp>=1.0.0",                    # Anthropic's MCP framework
+
+    # Configuration & Environment
+    "python-dotenv>=1.0.0",          # Load .env files
+    "pyyaml>=6.0.0",                 # YAML config files
+    "pydantic>=2.0.0",               # Data validation
+    "pydantic-settings>=2.0.0",      # Settings management
+
+    # Async Support
+    "aiohttp>=3.9.0",                # Async HTTP client
+    "aiofiles>=23.0.0",              # Async file operations
+
+    # CLI
+    "typer>=0.9.0",                  # CLI framework
+    "rich>=13.0.0",                  # Pretty terminal output
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+# Run with: google-ai-engine
+google-ai-engine = "src.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
