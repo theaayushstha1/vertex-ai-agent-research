@@ -10,6 +10,19 @@ Repository: https://github.com/theaayushstha1/vertex-ai-agent-research
 """
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from parent folder (adk_deploy) or current folder
+env_paths = [
+    Path(__file__).parent.parent / '.env',  # adk_deploy/.env
+    Path(__file__).parent / '.env',          # cs_navigator_unified/.env
+    Path.cwd() / '.env',                     # current working directory
+]
+for env_path in env_paths:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 from google.adk.agents import LlmAgent
 from google.adk.tools import agent_tool
 from google.adk.tools.google_search_tool import GoogleSearchTool
