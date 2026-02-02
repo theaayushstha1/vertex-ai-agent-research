@@ -13,7 +13,6 @@
 # OAuth credentials and tokens
 credentials/
 *.json
-!.env.example
 
 # Service account keys
 *-service-account.json
@@ -126,3 +125,7 @@ SESSION_HANDOFF.md
 CONTINUE_PROMPT.txt
 *.db
 .adk/
+
+# Local docs (not for repo)
+HOW_TO_RUN.md
+.env.example
