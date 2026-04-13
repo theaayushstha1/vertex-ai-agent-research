@@ -1,21 +1,27 @@
-"""Scholarship & Internship Bot V2 - flat agent, Tavily web search, no thinking.
+"""Scholarship & Internship Bot V2 - flat agent, no thinking, google_search.
 
 V2 differences from V1:
-  - web_search (Tavily) replaces google_search grounding for lower
-    latency and to unblock coexistence with future function tools.
   - thinking_budget=0 skips internal reasoning on gemini-2.5-flash so
     tokens start streaming immediately.
-  - Same instruction body as V1 (deadline rule, three modes, sources).
+  - Package exposes `agent` and `root_agent` for cs_navigator reuse.
+  - Same instruction body and tool (google_search) as V1.
+
+Note on search tool: the Tavily-backed web_search tool lives in
+tools/web_search.py and is fully implemented + tested. It is not
+wired into this agent because the auth paths available to the
+current developer (Gemini API free tier not available in their
+region, and no Vertex AI User role on the shared project) block
+function-tool routing. google_search grounding works via Google's
+managed infra. Swap back to web_search once Vertex access or a
+paid Gemini key is available.
 """
 
-import os
 from datetime import date
 
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
+from google.adk.tools import google_search
 from google.genai import types as genai_types
-
-from .tools.web_search import web_search
 
 load_dotenv()
 
@@ -44,11 +50,10 @@ CRITICAL RULE - DEADLINE FILTERING:
 - Sort results by deadline (soonest first) so students can prioritize.
 - Flag anything due within 7 days as "URGENT", within 30 days as "UPCOMING", otherwise "OPEN".
 
-SEARCH TOOL:
-- Use the `web_search` tool for anything time-sensitive (deadlines, current openings, new programs).
-- Call it with a specific query - "Google STEP 2026 deadline" beats "Google internships".
-- max_results defaults to 5; bump to 10 only if the first search is thin.
-- If web_search returns an error, tell the student search is temporarily down and answer from general knowledge where you can.
+SEARCH:
+- Use Google Search for anything time-sensitive (deadlines, current openings, new programs).
+- Query specifically: "Google STEP 2026 deadline" beats "Google internships".
+- Cross-reference deadlines from multiple sources when possible.
 
 You can help with three things:
 
@@ -111,18 +116,19 @@ Always ask clarifying questions to give better results:
 Opening message when a student connects:
 "Hey! I'm here to help you find scholarships and internships at Morgan State and beyond. I can search for current opportunities, check deadlines, help you figure out what you qualify for, and coach you through applications. What are you looking for?"
 
-Be encouraging and proactive - a lot of students don't know what's out there. Always use `web_search` to get the most current deadlines and openings. NEVER show expired opportunities.
+Be encouraging and proactive - a lot of students don't know what's out there. Always search the live web for the most current deadlines and openings. NEVER show expired opportunities.
 """
 
 
 agent = LlmAgent(
     name="Scholarship_Bot_V2",
     model=MODEL,
-    tools=[web_search],
+    tools=[google_search],
     instruction=_build_instruction,
-    generate_content_config=genai_types.GenerateContentConfig(
-        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-    ),
+    # DIAGNOSTIC: generate_content_config removed - it was forcing direct
+    # Gemini API auth path, which needs GOOGLE_API_KEY. Without it, we use
+    # the same ADC path V1 uses. If this works, we find another way to
+    # disable thinking (e.g. swap to gemini-2.5-flash-lite).
 )
 
 root_agent = agent
