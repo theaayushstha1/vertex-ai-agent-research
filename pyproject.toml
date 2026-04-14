@@ -22,6 +22,9 @@ dependencies = [
     # Google ADK (Agent Development Kit)
     "google-adk>=0.1.0",                 # Google Agent Development Kit for Vertex AI agents
 
+    # Web search for scholarship V2 (replaces google_search grounding)
+    "tavily-python>=0.3.0",
+
     # Google APIs (Gmail & Calendar)
     "google-api-python-client>=2.100.0", # Gmail, Calendar API client
     "google-auth-oauthlib>=1.2.0",       # OAuth authentication
