@@ -20,16 +20,16 @@ def _get_client() -> TavilyClient:
     return TavilyClient(api_key=api_key)
 
 
-def web_search(query: str, max_results: int = 3) -> dict[str, Any]:
+def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
     """Search the web for current scholarship, internship, and career info.
 
-    Use ONE broad search per turn. Only issue a second search if the first
-    is thin or missing a specific piece of info.
+    Start with one broad query. Do a second, narrower query if the first
+    misses Morgan-State-specific, HBCU-specific, or major-specific hits.
 
     Args:
-        query: What to search for. Be specific (e.g., "Google STEP 2026
-            deadline" beats "Google internships").
-        max_results: How many results to return, 1-10. Default 3.
+        query: What to search for. Be specific (e.g., "HBCU CS scholarships
+            2026 junior" beats "scholarships").
+        max_results: How many results to return, 1-10. Default 5.
 
     Returns:
         A dict with key "results" holding a list of
