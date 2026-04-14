@@ -1,25 +1,26 @@
-"""Scholarship & Internship Bot V2 - flat agent, Tavily web search.
+"""Scholarship & Internship Bot V2 - parallel fast-answer + deep-search.
 
-V2 differences from V1:
-  - Tavily web_search replaces google_search grounding. Search call itself
-    is faster (~1-2s vs 4-8s), which offsets gemini-2.5-flash's thinking
-    overhead. Net: V2 should still be faster than V1 on search-heavy turns.
-  - Package exposes `agent` and `root_agent` for cs_navigator reuse.
+Architecture: a ParallelAgent root fans out to two LlmAgent children:
+
+  Fast_Answer  - no tools, brief general-knowledge take (streams in ~1-2s)
+  Deep_Search  - web_search tool, full instruction with urgency flags
+                 (streams detailed list as search results come back)
+
+Both run concurrently. The user sees a quick preamble first and detailed
+search-backed results roll in a few seconds later.
 
 Model notes:
-  - gemini-2.5-flash is used (V1's model, confirmed available in project).
-  - flash-lite is faster but has a function-call name-resolution bug
-    (returns "run" instead of the tool's real name).
-  - 2.0-flash is not enabled in this Vertex project.
-  - Disabling 2.5-flash's thinking_budget requires generate_content_config,
-    which routes through direct Gemini API and demands GOOGLE_API_KEY
-    (no free tier available to the current developer).
+  - gemini-2.5-flash is used for both children (V1 model, confirmed
+    available in this Vertex project).
+  - flash-lite has a function-call name-resolution bug, 2.0-flash is
+    not enabled in the project, and disabling thinking_budget requires
+    generate_content_config which forces direct Gemini API auth we lack.
 """
 
 from datetime import date
 
 from dotenv import load_dotenv
-from google.adk.agents import LlmAgent
+from google.adk.agents import LlmAgent, ParallelAgent
 
 from .tools.web_search import web_search
 
@@ -28,7 +29,7 @@ load_dotenv()
 MODEL = "gemini-2.5-flash"
 
 
-def _build_instruction(ctx) -> str:
+def _build_deep_instruction(ctx) -> str:
     today = date.today()
     today_iso = today.strftime("%Y-%m-%d")
     today_human = today.strftime("%B %d, %Y")
@@ -41,6 +42,8 @@ def _build_instruction(ctx) -> str:
 
     return f"""
 You are the Morgan State Scholarship & Internship Bot helping CS students find funding and career opportunities. Today is {today_human} ({today_iso}), semester: {semester} {today.year}.
+
+A parallel agent is also answering the student with a quick general-knowledge take. Your job is the thorough, verified, live-web-search response. Lead with "**Detailed live results:**" so the student can tell your output apart from the quick-take agent's.
 
 DEADLINE RULE (CRITICAL):
 - Compare every deadline to {today_iso}. Do the date math yourself.
@@ -65,11 +68,39 @@ Do NOT silently drop fields. If you don't know an amount or link, say "(not list
 """
 
 
-agent = LlmAgent(
-    name="Scholarship_Bot_V2",
+def _build_fast_instruction(ctx) -> str:
+    today = date.today()
+    today_human = today.strftime("%B %d, %Y")
+    return f"""
+You give a very fast (2-3 sentence) general-knowledge take on the student's scholarship or internship question. Today is {today_human}. A parallel deep-search agent is running live web search in parallel and will return a detailed verified list shortly after you.
+
+RULES:
+- Do NOT use any tools. Do NOT call web_search. Speed > verification.
+- Lead with "**Quick take:**" so the student can tell your output apart from the deep-search agent's.
+- Name 2-3 well-known scholarships/internships the student likely qualifies for from general knowledge (Google STEP, UNCF Scholars, Thurgood Marshall, Morgan State departmental awards, etc. for CS/HBCU context).
+- End with one short line like "Live results coming in now..." to cue the student that more is on the way.
+- Max 4 sentences total. Be warm, be quick. Do NOT attempt to list 6+ options - that is the other agent's job.
+"""
+
+
+fast_answer = LlmAgent(
+    name="Fast_Answer",
+    model=MODEL,
+    tools=[],
+    instruction=_build_fast_instruction,
+)
+
+deep_search = LlmAgent(
+    name="Deep_Search",
     model=MODEL,
     tools=[web_search],
-    instruction=_build_instruction,
+    instruction=_build_deep_instruction,
+)
+
+
+agent = ParallelAgent(
+    name="Scholarship_Coordinator_V2",
+    sub_agents=[fast_answer, deep_search],
 )
 
 root_agent = agent
