@@ -20,23 +20,23 @@ def _get_client() -> TavilyClient:
     return TavilyClient(api_key=api_key)
 
 
-def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
+def web_search(query: str, max_results: int = 3) -> dict[str, Any]:
     """Search the web for current scholarship, internship, and career info.
 
-    Use this for questions about current opportunities, deadlines, company
-    programs, or anything that changes week-to-week. Do NOT use for general
-    CS concepts or historical facts.
+    Use ONE broad search per turn. Only issue a second search if the first
+    is thin or missing a specific piece of info.
 
     Args:
         query: What to search for. Be specific (e.g., "Google STEP 2026
             deadline" beats "Google internships").
-        max_results: How many results to return, 1-10. Default 5.
+        max_results: How many results to return, 1-10. Default 3.
 
     Returns:
         A dict with key "results" holding a list of
         {title, url, snippet, published_date} entries. On error, the dict
         has an "error" key and empty "results".
     """
+    max_results = max(1, min(10, max_results))
     try:
         client = _get_client()
         raw = client.search(
