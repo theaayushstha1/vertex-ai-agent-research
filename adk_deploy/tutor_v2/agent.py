@@ -23,7 +23,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
-from google.adk.tools import VertexAiSearchTool
 
 # Import V1 tool modules without modifying V1. We add adk_deploy to sys.path
 # so the tutor package resolves correctly with its relative imports intact
@@ -51,15 +50,17 @@ load_dotenv()
 
 MODEL = "gemini-2.5-flash"
 
-KNOWLEDGE_BASE_ID = os.getenv("VERTEX_AI_DATASTORE_ID")
-SYLLABI_DATASTORE_ID = os.getenv("SYLLABI_DATASTORE_ID")
-
-_knowledge_tools = (
-    [VertexAiSearchTool(data_store_id=KNOWLEDGE_BASE_ID)] if KNOWLEDGE_BASE_ID else []
-)
-_syllabi_tools = (
-    [VertexAiSearchTool(data_store_id=SYLLABI_DATASTORE_ID)] if SYLLABI_DATASTORE_ID else []
-)
+# NOTE on knowledge base + syllabi search:
+# V1 tutor wired VertexAiSearchTool for the knowledge base and syllabi datastores.
+# Vertex's runtime rejects a request that mixes function tools with search tools
+# on the same LlmAgent ("Multiple tools are supported only when they are all
+# search tools"). V2 is flat and uses many function tools, so VertexAiSearchTool
+# cannot live on this agent directly.
+#
+# Follow-up: wrap the Vertex AI Search datastore query as a regular function
+# tool (like Tavily's web_search), or expose it via a dedicated search sub-agent
+# called through AgentTool. Either restores SYLLABUS ADVISOR and course-material
+# lookups without breaking the flat structure.
 
 _INSTRUCTION = """
 You are AI Tutor, a friendly and encouraging academic assistant for Computer Science and Math students.
@@ -258,8 +259,6 @@ _TOOLS = [
     update_quiz_score,
     get_weaknesses,
     log_session,
-    *_knowledge_tools,
-    *_syllabi_tools,
 ]
 
 agent = LlmAgent(
