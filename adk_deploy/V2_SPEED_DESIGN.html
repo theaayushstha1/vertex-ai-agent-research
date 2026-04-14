@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tutor V2 + Scholarship V2 — Speed Architecture Design</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --fg: #e6e7ea;
+    --muted: #9aa0a6;
+    --accent: #7cc4ff;
+    --accent-soft: #1e3a52;
+    --border: #242835;
+    --code-bg: #0b0d12;
+    --ok: #7bd88f;
+    --warn: #f6c177;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fafbfc;
+      --panel: #ffffff;
+      --fg: #1a1d23;
+      --muted: #5f6368;
+      --accent: #0b5fff;
+      --accent-soft: #e5efff;
+      --border: #e2e5ea;
+      --code-bg: #f4f5f7;
+      --ok: #1f7a3a;
+      --warn: #8a5a00;
+    }
+  }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+  }
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.25;
+    margin: 0 0 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+  }
+  h2 {
+    font-size: 1.4rem;
+    margin-top: 40px;
+    margin-bottom: 12px;
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1.1rem;
+    margin-top: 28px;
+    margin-bottom: 8px;
+  }
+  p, li { color: var(--fg); }
+  ul, ol { padding-left: 24px; }
+  li { margin: 6px 0; }
+  strong { color: var(--fg); }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+  pre code {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 0.88em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-soft);
+    color: var(--fg);
+    font-weight: 600;
+  }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 16px 0;
+    padding: 4px 16px;
+    color: var(--muted);
+    background: var(--panel);
+    border-radius: 0 6px 6px 0;
+  }
+  .callout {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 16px 0;
+  }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.warn { border-left-color: var(--warn); }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 32px 0;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<div class="meta">Date: 2026-04-13 • Status: Draft for review • Author: Julian + Claude</div>
+<h1>Tutor V2 + Scholarship V2 — Speed Architecture Design</h1>
+
+<h2>Problem</h2>
+<p>The current <code>adk_deploy/tutor/</code> and <code>adk_deploy/scholarship_internship_bot/</code> agents feel slow when run locally via <code>adk run</code> / <code>adk web</code>. Both first-token latency and tool-heavy query latency are noticeable. Root causes:</p>
+<ol>
+  <li><strong>Tutor</strong> uses a root <code>LlmAgent</code> that routes to 6 sub-agents. Each user turn requires at minimum 2 LLM round-trips from laptop to Vertex AI (root classifies → sub-agent responds), plus tool calls that go through the sub-agent. Every hop is network latency.</li>
+  <li>Both bots use <code>gemini-2.5-flash</code>, which has reasoning / thinking mode on by default. This silently adds 2–5s of hidden reasoning per turn before the first token.</li>
+  <li><strong>Scholarship</strong> uses <code>google_search</code> grounding, which runs search + re-ranking + large context injection server-side. Typical latency: 4–8s before any tokens stream.</li>
+  <li><code>google_search</code> grounding is mutually exclusive with custom function tools on the same agent. This is why scholarship is a separate bot today — it can't coexist with the tutor's function tools.</li>
+  <li>Long instructions are re-sent on every turn; no prompt caching is in use.</li>
+</ol>
+
+<h2>Goals</h2>
+<ul>
+  <li>Cut end-to-end latency ~2–3x and first-token latency ~3–5x on typical turns.</li>
+  <li>Preserve functional behavior: same tools, same knowledge bases, same student experience.</li>
+  <li>Keep current agents intact for A/B comparison; ship V2 as parallel files.</li>
+  <li>Stay on the ADK so agents remain deployable to Vertex AI Agent Engine.</li>
+  <li><strong>Design V2 agents so they can later be imported into <code>cs_navigator</code> as sub-agents or <code>AgentTool</code>s without rework</strong> — clean imports, no hidden module-level state, no <code>root_agent</code>-only assumptions.</li>
+</ul>
+
+<h2>Non-Goals</h2>
+<ul>
+  <li>Rewriting or refactoring the current V1 agents.</li>
+  <li>Merging into <code>cs_navigator</code> (that is a separate, already-planned integration).</li>
+  <li>Changing the Canvas integration or Vertex AI Search datastores.</li>
+  <li>Caching tool responses beyond what already exists (out of scope for this pass).</li>
+</ul>
+
+<h2>Approach</h2>
+<p>Flatten the architecture, disable thinking, and replace <code>google_search</code> grounding with Tavily as a function tool. Specifically:</p>
+<ol>
+  <li><strong>Flatten.</strong> One <code>LlmAgent</code> per bot. No sub-agents, no <code>AgentTool</code> wrapping. The six tutor personalities become labeled sections of a single instruction the model selects from based on question type.</li>
+  <li><strong>Disable thinking.</strong> Set <code>thinking_config={"thinking_budget": 0}</code> on both V2 agents so <code>gemini-2.5-flash</code> skips internal reasoning and starts streaming tokens immediately.</li>
+  <li><strong>Replace grounding with Tavily.</strong> The scholarship V2 agent uses a custom <code>web_search</code> function tool backed by the Tavily API. This unblocks colocation with other function tools (relevant for future merges) and drops search latency from 4–8s to 1–2s.</li>
+  <li><strong>Parallel files only.</strong> V1 stays untouched. V2 lives in <code>adk_deploy/tutor_v2/</code> and <code>adk_deploy/scholarship_internship_bot_v2/</code>.</li>
+</ol>
+
+<h3>Expected speed wins (rough, per turn)</h3>
+<table>
+  <thead><tr><th>Path</th><th>V1</th><th>V2 target</th><th>How</th></tr></thead>
+  <tbody>
+    <tr><td>Tutor "explain recursion"</td><td>6–10s</td><td>1.5–3s</td><td>No routing hop + no thinking</td></tr>
+    <tr><td>Tutor code-debug w/ search</td><td>10–18s</td><td>4–7s</td><td>Single hop + no thinking + same tools</td></tr>
+    <tr><td>Scholarship search</td><td>12–25s</td><td>4–8s</td><td>Tavily instead of grounding + no thinking</td></tr>
+    <tr><td>Scholarship chat (no search)</td><td>6–10s</td><td>1.5–3s</td><td>No thinking, same model</td></tr>
+  </tbody>
+</table>
+<p class="meta">These are estimates based on typical ADK latency profiles, not measurements. Post-implementation we will measure against V1 on the same prompts.</p>
+
+<h2>Architecture</h2>
+
+<h3>Tutor V2 (<code>adk_deploy/tutor_v2/</code>)</h3>
+<p>One flat <code>LlmAgent</code> with the union of all current tools:</p>
+<pre><code>tutor_v2 (LlmAgent, gemini-2.5-flash, thinking_budget=0)
+├── tools:
+│   ├── Canvas: connect_canvas, get_course_assignments,
+│   │   sync_course_materials, sync_all_courses
+│   ├── Search: search_course_materials (existing wrapper)
+│   ├── Exam prep: find_upcoming_exams, generate_exam_prep_plan
+│   ├── Progress: get_student_profile, update_quiz_score,
+│   │   get_weaknesses, log_session
+│   └── Knowledge bases:
+│       ├── VertexAiSearchTool(KNOWLEDGE_BASE_ID)
+│       └── VertexAiSearchTool(SYLLABI_DATASTORE_ID)
+└── instruction: single prompt with six labeled "modes"
+    (CS Tutor, Math Tutor, Quiz Master, Code Debugger,
+     Problem Solver, Syllabus Advisor) that the model
+     selects from based on question type</code></pre>
+
+<p><strong>Instruction structure:</strong></p>
+<ul>
+  <li>Short opening: identity, Canvas integration rules, student profile rules.</li>
+  <li>"Mode selection" block: "Pick the mode that matches the question type."</li>
+  <li>Six mode sections, each with the teaching approach, tool-use guidance, and tone from the current sub-agent.</li>
+  <li>Shared rules (concise, human, follow-up questions on conceptual answers) at the end.</li>
+</ul>
+
+<p><strong>Personality preservation:</strong> Each mode section keeps its existing tone and teaching rules verbatim (CS Tutor's intuitive → technical → example flow; Math Tutor's intuition-first rule; etc.). The model reads the full instruction each turn but only activates the matching mode.</p>
+
+<p><strong>Tool coexistence:</strong> All current tools are already function tools, so they fit on one agent. <code>VertexAiSearchTool</code> is a function tool, not grounding, so it coexists fine.</p>
+
+<h3>Scholarship V2 (<code>adk_deploy/scholarship_internship_bot_v2/</code>)</h3>
+<p>One flat <code>LlmAgent</code> with a custom Tavily-backed web search tool replacing <code>google_search</code>:</p>
+<pre><code>scholarship_v2 (LlmAgent, gemini-2.5-flash, thinking_budget=0)
+├── tools:
+│   └── web_search (custom function tool, Tavily-backed)
+└── instruction: current scholarship prompt, unchanged —
+    V1 doesn't reference "google_search" by name; the
+    model calls web_search instead of relying on grounding</code></pre>
+
+<p><strong><code>web_search</code> tool contract:</strong></p>
+<pre><code>web_search(query: str, max_results: int = 5) -> list[dict]
+  returns: [{title, url, snippet, published_date?}, ...]</code></pre>
+
+<p>Implementation: wraps <code>https://api.tavily.com/search</code> with <code>include_answer=False</code>, <code>search_depth="basic"</code> (fast tier), <code>max_results=5</code> by default. Reads <code>TAVILY_API_KEY</code> from env. No key ever committed.</p>
+
+<p><strong>Instruction preservation:</strong> The current scholarship instruction (deadline filtering rule, three modes, source prioritization, formatting rules) stays verbatim. Only swap out the grounding reference — the model already knows how to call a function tool.</p>
+
+<h3>File layout</h3>
+<pre><code>adk_deploy/
+├── tutor/                              # V1 untouched
+├── tutor_v2/
+│   ├── __init__.py                     # exposes `root_agent` and `agent`
+│   └── agent.py                        # flat LlmAgent, imports V1 tools
+├── scholarship_internship_bot/         # V1 untouched
+└── scholarship_internship_bot_v2/
+    ├── __init__.py                     # exposes `root_agent` and `agent`
+    ├── agent.py                        # flat LlmAgent
+    └── tools/
+        ├── __init__.py
+        └── web_search.py               # Tavily-backed function tool</code></pre>
+
+<p><strong>Tool import pattern (Tutor V2):</strong> V2 reuses V1's tool implementations by direct Python import — e.g., <code>from ..tutor.tools.canvas_tools import connect_canvas</code>. No copy, no re-export shim. Only <code>agent.py</code> changes; tool logic is shared source of truth.</p>
+
+<p><strong>Scholarship V2</strong> owns <code>web_search.py</code> outright; no shared code with V1 since V1 used grounding.</p>
+
+<div class="callout">
+  <strong>cs_navigator readiness:</strong> Each V2 package exposes the agent as both <code>root_agent</code> (for <code>adk run</code>) and <code>agent</code> (for import into <code>cs_navigator</code>). No module-level side effects on import beyond reading env vars. This lets <code>cs_navigator</code> later do <code>from adk_deploy.tutor_v2 import agent as tutor_agent</code> and wrap it in <code>AgentTool(agent=tutor_agent)</code> or add it to <code>sub_agents=[...]</code> without touching V2 internals.
+</div>
+
+<h2>Data flow</h2>
+
+<h3>Tutor V2 turn (e.g., "Debug my COSC 251 code")</h3>
+<pre><code>Student → tutor_v2 LLM call (1 round-trip)
+         ├── instruction: all modes, Canvas rules, etc.
+         ├── model selects "Code Debugger" mode internally
+         ├── optionally calls search_course_materials(...) → tool result back
+         └── streams reply</code></pre>
+<p>Compared to V1 which was: student → root LLM call → sub-agent LLM call → tool → streamed reply (2+ round-trips).</p>
+
+<h3>Scholarship V2 turn (e.g., "Find CS scholarships for juniors")</h3>
+<pre><code>Student → scholarship_v2 LLM call
+         ├── instruction: deadline filter rule, modes, sources
+         ├── calls web_search("Morgan State CS scholarships 2026") → Tavily JSON back
+         ├── optionally calls web_search again for ScholarshipUniverse
+         └── streams reply with verified deadlines</code></pre>
+<p>Compared to V1 which was: student → single LLM call with <code>google_search</code> grounding that does search + re-rank + injection server-side (slow).</p>
+
+<h2>Error handling</h2>
+<ul>
+  <li><strong>Tavily failures</strong> (network, 4xx, 5xx, rate-limit): the tool returns <code>{"error": "&lt;message&gt;", "results": []}</code> and the model tells the student search is temporarily unavailable and falls back to general knowledge. No retries in tool (keep it fast); the model can retry by calling the tool again if it wants.</li>
+  <li><strong>Missing <code>TAVILY_API_KEY</code></strong>: <code>web_search</code> raises at import time with a clear message so the agent fails to start rather than failing silently per-turn.</li>
+  <li><strong>Vertex AI Search datastore envs missing</strong> (existing V1 behavior): tools list is empty, agent still works without knowledge base.</li>
+  <li><strong>Canvas not connected</strong>: existing V1 tool behavior, unchanged.</li>
+</ul>
+
+<h2>Testing</h2>
+<p>Manual A/B comparison is the core test plan:</p>
+<ol>
+  <li>Run V1 tutor: <code>adk run adk_deploy/tutor</code>. Send 5 canonical prompts, record wall-clock time to first token and total time.</li>
+  <li>Run V2 tutor: <code>adk run adk_deploy/tutor_v2</code>. Same 5 prompts, record the same timings.</li>
+  <li>Repeat for scholarship V1 vs V2 with 3 canonical prompts (explain a scholarship topic, find CS scholarships, find summer internships).</li>
+  <li>Verify V2 preserves: deadline filtering, mode-appropriate tone, tool calls fire correctly.</li>
+</ol>
+
+<p><strong>Canonical tutor prompts:</strong></p>
+<ul>
+  <li>"Explain recursion like I'm a beginner"</li>
+  <li>"Debug this Python function: &lt;small buggy snippet&gt;"</li>
+  <li>"Quiz me on Big-O, 5 questions"</li>
+  <li>"What's in the COSC 251 syllabus?" (requires syllabi datastore)</li>
+  <li>"Walk me through this LeetCode two-sum problem"</li>
+</ul>
+
+<p><strong>Canonical scholarship prompts:</strong></p>
+<ul>
+  <li>"Find CS scholarships for junior year"</li>
+  <li>"What are the Google STEP / Microsoft Explore deadlines?"</li>
+  <li>"Help me write a personal statement for the UNCF scholarship"</li>
+</ul>
+
+<div class="callout ok">
+  <strong>Success criteria</strong>
+  <ul>
+    <li>V2 end-to-end time is ≤ 50% of V1 on at least 6 of the 8 combined prompts.</li>
+    <li>V2 first-token time is ≤ 40% of V1 on the same prompts.</li>
+    <li>No regression in correctness: tool calls fire, deadlines get filtered, modes pick the right teaching style.</li>
+  </ul>
+</div>
+
+<p>If the speed targets miss, the fallback is a follow-up spec (not in scope): either downgrade to <code>gemini-2.5-flash-lite</code> or add prompt-level context caching.</p>
+
+<h2>Environment and secrets</h2>
+<ul>
+  <li>Add <code>TAVILY_API_KEY</code> to <code>.env.example</code> (not <code>.env</code>) with placeholder value.</li>
+  <li><code>.env</code> remains gitignored as today.</li>
+  <li>No API keys in any file committed to the repo, including this spec.</li>
+</ul>
+
+<h2>Open questions</h2>
+<p>None blocking. Already-settled questions:</p>
+<ul>
+  <li><strong>Personality preservation:</strong> yes, keep six mode sections with their existing tones and teaching rules.</li>
+  <li><strong>Search provider:</strong> Tavily, free tier 1000/month; Serper is the paid upgrade if we outgrow it.</li>
+  <li><strong>Scholarship/internship split:</strong> keep combined for now; splitting only wins under parallel execution, which ADK local CLI doesn't provide without re-adding a routing hop. Revisit if/when cs_navigator orchestrates them as parallel sub-agents.</li>
+</ul>
+
+<h2>Out of scope (followups)</h2>
+<ul>
+  <li>Prompt caching via Gemini context caching API.</li>
+  <li>Streaming-first CLI wrapper that shows tokens faster.</li>
+  <li>Migrating V2 into <code>cs_navigator</code> as sub-agents (separate integration spec already exists at <code>docs/superpowers/specs/2026-04-08-tutor-scholarship-integration-design.md</code>).</li>
+  <li>Measuring and optimizing individual tool latencies (Canvas sync, Vertex AI Search).</li>
+  <li>Downgrading some paths to <code>gemini-2.5-flash-lite</code>.</li>
+</ul>
+
+<hr>
+<p class="meta">Source markdown: <code>docs/superpowers/specs/2026-04-13-tutor-scholarship-v2-speed-design.md</code></p>
+
+</main>
+</body>
+</html>
